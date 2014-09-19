@@ -1,48 +1,36 @@
 package main
 
 import (
-	"fmt"
-	_ "net/rpc"
-	_ "log"
-	"strconv"
-	"reflect"
+	"circuitbreaker"
 	"errors"
+	"time"
 )
-type C struct {
-	name string
+
+type DodgyCommand struct {}
+func (_ DodgyCommand) Run()(interface{}, error) {
+	return 0, errors.New("oh oh,... service is returning an error")
 }
-type Args struct {
-	A,B int
-	c *C
+
+func healthyService() (interface {}, error){
+	return 0, nil
 }
+
+
+
 
 func main() {
-
-	var args = new(Args)
-
-	fmt.Println("args.A:" + strconv.Itoa(args.A))
-	fmt.Println("args.B:" + strconv.Itoa(args.B))
-	fmt.Println("type of args.A:", reflect.TypeOf(args.A))
-	fmt.Println("type of args.B:", reflect.TypeOf(args.B))
-	fmt.Println("type of args.C:", reflect.TypeOf(args.c))
-
-	args2 := Args{}
-	fmt.Println("args.A:" + strconv.Itoa(args2.A))
-	fmt.Println("args.B:" + strconv.Itoa(args2.B))
-	fmt.Println("type of args.A:", reflect.TypeOf(args.A))
-	fmt.Println("type of args.B:", reflect.TypeOf(args.B))
-	fmt.Println("type of args.C:", reflect.TypeOf(args.c))
+	cb := circuitbreaker.New("test", 3, time.Duration(10) * time.Second)
+	numFailures := 10
+	for {
+		if numFailures > 0 {
+			time.Sleep(3 * time.Second)
+			cb.Execute(DodgyCommand{})
+			numFailures--
+		}else{
+			time.Sleep(3 * time.Second)
+			cb.Execute(circuitbreaker.CommandFunc(healthyService))
+		}
+	}
 
 
-
-//	client,err := rpc.DialHTTP("tcp", "localhost" + ":1234")
-//	if err != nil {
-//		log.Fatal("Error found while getting a client")
-//	}
-//
-//	wrapper := NewClientWrapper(client)
-//
-//	var reply int
-//	wrapper.execute("addOperation", Args{7,8}, &reply)
-//	fmt.Println("The reply is:" + reply)
 }

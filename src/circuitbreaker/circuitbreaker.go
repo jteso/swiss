@@ -4,16 +4,17 @@ import (
 	_ "log"
 	"errors"
 	"time"
+	"log"
 )
 
 
 // >>>>>>>>>>>>>>>>>>>
 // Public Constructors
 // >>>>>>>>>>>>>>>>>>>
-func New(key string, closeAfter int, halfOpenAfter Duration) (*ICircuitBreaker) {
+func New(key string, closeAfter int, halfOpenAfter time.Duration) (ICircuitBreaker) { // todo - read this to understand why not to put a pointer to interface: http://stackoverflow.com/questions/13511203/why-cant-i-assign-a-struct-to-an-interface
 	return theCircuitBreakerFactory.getOrCreateCircuitBreakerWithKey(key, closeAfter, halfOpenAfter)
 }
-func Get(key string) (*ICircuitBreaker, error) {
+func Get(key string) (ICircuitBreaker, error) {
 	i, ok := theCircuitBreakerFactory.cbs[key]
 	if ok{
 		return i, nil
@@ -31,15 +32,15 @@ var	theCircuitBreakerFactory  = &circuitBreakerFactory{make(map[string] *Circuit
 type circuitBreakerFactory struct{
 	cbs map[string] *CircuitBreaker
 }
-func (cbf *circuitBreakerFactory)getOrCreateCircuitBreakerWithKey(key string, closeAfter int, halfOpenAfter Duration) (*ICircuitBreaker){
-//	if cbf.cbs == nil {
-//		cbf.cbs = make(map[string] *CircuitBreaker)
-//	}
+func (cbf *circuitBreakerFactory)getOrCreateCircuitBreakerWithKey(key string, closeAfter int, halfOpenAfter time.Duration) (ICircuitBreaker){
+	//	if cbf.cbs == nil {
+	//		cbf.cbs = make(map[string] *CircuitBreaker)
+	//	}
 	i, ok := cbf.cbs[key]
 	if ok{
 		return i
 	}else{
-		newCircuitBreaker := &CircuitBreaker{key, OPEN, closeAfter, halfOpenAfter}
+		newCircuitBreaker := &CircuitBreaker{key, CLOSED, closeAfter, halfOpenAfter, closeAfter}
 		cbf.cbs[key] = newCircuitBreaker
 		return newCircuitBreaker
 	}
@@ -54,10 +55,10 @@ type ICircuitBreaker interface {
 }
 
 // Circuit breaker configuration
-const (
-	defaultCloseAfter int        	 = 3
-	defaultHalfOpenAfter Duration	 = 10000
-)
+//const (
+//	defaultCloseAfter int        	 = 3
+//	defaultHalfOpenAfter Duration	 = 10000
+//)
 //states of the circuit breaker
 type CircuitBreakerState uint8
 
@@ -72,35 +73,51 @@ type CircuitBreaker struct {
 	name string
 	CircuitBreakerState
 	closeAfter int
-	halfOpenAfter Duration
+	halfOpenAfter time.Duration
 
 	failureCount int // <-- if 0 trip the breaker
 	// analytics
 	// monitoring
 }
 
-func (c CircuitBreaker) transitionTo(cbs CircuitBreakerState) {
+func (c *CircuitBreaker) transitionTo(cbs CircuitBreakerState) {
 	switch cbs{
-	case OPEN: c.state == OPEN
-	case HALF_OPEN: c.state == HALF_OPEN
-	case CLOSED: c.state == CLOSED
+	case OPEN:
+		c.CircuitBreakerState = OPEN
+		break
+	case HALF_OPEN:
+		c.CircuitBreakerState = HALF_OPEN
+		break
+	case CLOSED:
+		c.CircuitBreakerState = CLOSED
+		break
 	}
 }
 func (c *CircuitBreaker) resetFailureCount() {
 	c.failureCount = c.closeAfter
 }
+func (c *CircuitBreaker) setResetTimer(){
+	timeout := make(chan bool, 1)
+	go func() {
+		time.Sleep(c.halfOpenAfter)
+		timeout <- true
+	}()
+	<-timeout
+	c.attemptReset()
+}
 func (c *CircuitBreaker) tripBreaker() {
 	c.transitionTo(OPEN)
-	go func() {
-		time.Sleep(c.halfOpenAfter * time.Millisecond)
-		c.AttemptReset()
-	}()
+	go c.setResetTimer()
+	log.Println("Circuite breaker has been tripped")
+
 }
 func (c *CircuitBreaker) attemptReset() {
+	log.Println("Attempting to reset the circuit")
 	c.transitionTo(HALF_OPEN)
 }
 
 func (c *CircuitBreaker) resetBreaker() {
+	log.Println("Circuit breaker has been reset")
 	c.transitionTo(CLOSED)
 	c.resetFailureCount()
 }
@@ -110,6 +127,7 @@ func (c CircuitBreaker) AllowRequest() bool{
 }
 
 func (c *CircuitBreaker) MarkSuccess() {
+	log.Println("Service invocation has succeeded")
 	switch c.CircuitBreakerState{
 	case CLOSED:
 		c.resetFailureCount()
@@ -119,6 +137,7 @@ func (c *CircuitBreaker) MarkSuccess() {
 }
 
 func (c *CircuitBreaker) MarkFailure(){
+	log.Println("Service invocation has failed")
 	switch c.CircuitBreakerState{
 	case CLOSED:
 		c.failureCount -=1
@@ -142,6 +161,7 @@ func (c *CircuitBreaker)Execute(command Command)(interface{}, error){
 		}
 		return result, err
 	}else{
+		log.Println("Service invocation not allow due circuit breaker is OPEN")
 		return -1, errors.New("Circuit breaker is OPEN")
 	}
 
@@ -164,8 +184,8 @@ func (c *CircuitBreaker)Execute(command Command)(interface{}, error){
 type Command interface {
 	Run()(interface {}, error)
 }
-type CommandFunc func()(int, error)
-func (c CommandFunc) Run() (int, error){
+type CommandFunc func()(interface {}, error)
+func (c CommandFunc) Run() (interface {}, error){
 	return c()
 }
 
