@@ -16,8 +16,6 @@ func healthyService() (interface {}, error){
 }
 
 
-
-
 func main() {
 	cb := circuitbreaker.New("test", 3, time.Duration(10) * time.Second)
 	numFailures := 10
